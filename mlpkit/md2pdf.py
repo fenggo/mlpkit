@@ -39,9 +39,11 @@ for _subfont, _name in [(0, _CJK_FONT_NAME), (2, _CJK_MONO_NAME)]:
         try:
             pdfmetrics.registerFont(TTFont(_name, _CJK_FONT_FILE, subfontIndex=0))
         except Exception:
-            _alt = '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'
-            pdfmetrics.registerFont(TTFont(_name, _alt, subfontIndex=0))
-
+            # _alt = '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'
+            # pdfmetrics.registerFont(TTFont(_name, _alt, subfontIndex=0))
+            print("Warning: No CJK font found. Chinese/Japanese/Korean characters will not render correctly.")
+            _CJK_FONT_NAME = 'Helvetica'
+            _CJK_MONO_NAME = 'Courier'
 
 # ── Helpers ────────────────────────────────────────────────────────
 def resolve_paths(raw_input):
