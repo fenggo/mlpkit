@@ -19,7 +19,7 @@ from ase.io import read,write
 from ase.io.trajectory import Trajectory, TrajectoryWriter
 from ase.calculators.singlepoint import SinglePointCalculator
 from irff.md.gulp import opt,get_reax_energy,write_gulp_in
-from mlpkit.utils import (read_individuals, search_structure,generate_hbond_lib,
+from uspexkit.utils import (read_individuals, search_structure,generate_hbond_lib,
                             write_input,run_gulp, # add_structure,
                             lammps_opt_mtp,
                             write_output,write_geometry)
@@ -191,11 +191,12 @@ def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,
        else:
           density_ = density_rf[0]
 
-    indi = read_individuals(individuals=f'../{ref}/Individuals')  # g
-    if indi:
-       id_ = indi[-1][0] + 1
-    else:
-       id_ = 1
+    # 用 gp.csv 行数获取下一个晶体 ID（替代解析整个 Individuals 文件）
+    try:
+        with open('gp.csv') as f:
+            id_ = sum(1 for _ in f)
+    except FileNotFoundError:
+        id_ = 1
            
     if dft:
        data_pred = np.loadtxt('gp.csv',delimiter=',',skiprows=1)      ## get crystal feature data
@@ -773,7 +774,7 @@ def update(traj,inde=None,step=1000,tolerance=0.005,ncpu=1):
 
 def traj(fposcar="gatheredPOSCARS"):
     """Convert gatheredPOSCARS to ASE trajectory file."""
-    from mlpkit.utils import Stack
+    from uspexkit.utils import Stack
 
     with open(fposcar) as fbp:
         lines = fbp.readlines()
@@ -1030,7 +1031,7 @@ def fingerprint(gen=None, traj=None, i=-1,
         soap_n_max: SOAP radial basis count (default 8).
         soap_l_max: SOAP angular momentum maximum (default 6).
     """
-    from mlpkit.uspex_fast_core import build_distance_matrix, fingerprint_calc
+    from uspexkit.uspex_fast_core import build_distance_matrix, fingerprint_calc
 
     if gen is not None:
         atoms = read(gen)
@@ -1125,7 +1126,7 @@ def fingerprint(gen=None, traj=None, i=-1,
 
     # ── optional SOAP fingerprint ──
     if soap:
-        from mlpkit.soap import soap_fingerprint as _soap_fp
+        from uspexkit.soap import soap_fingerprint as _soap_fp
         t_s0 = _time.time()
         soap_fp = _soap_fp(atoms, r_cut=soap_r_cut, n_max=soap_n_max,
                            l_max=soap_l_max)
