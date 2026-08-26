@@ -1,6 +1,6 @@
-# uspexkit — USPEX 晶体结构预测后处理工具
+# mlpkit — machine learning potential toolkit
 
-`uspexkit` 是 USPEX 分子晶体结构预测（计算类型 310）的后处理工具包，提供轨迹转换、特征提取、高斯过程预测、高通量 DFT 筛选、破损分子修复等功能。
+`mlpkit` 是 USPEX 分子晶体结构预测（计算类型 310）的后处理工具包，提供轨迹转换、特征提取、高斯过程预测、高通量 DFT 筛选、破损分子修复等功能。
 
 ## 安装
 
@@ -39,7 +39,7 @@ pip install .
 将 USPEX 输出文件 `gatheredPOSCARS` 转换为 ASE `.traj` 轨迹文件，同时从 `Individuals` 文件中解析能量信息。
 
 ```bash
-uspexkit traj [--fposcar FILE]
+mlpkit traj [--fposcar FILE]
 ```
 
 ### 参数
