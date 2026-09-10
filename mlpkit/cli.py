@@ -5,6 +5,7 @@ import sys
 import numpy as np
 from mlpkit.core import pred, calc, traj, zmat, fdf, sample,calcdata,gp,fixbroken,add,addall,supercell,update,info,fingerprint,lib,ffield,molinfo
 from mlpkit.md2pdf import md2pdf
+from mlpkit.deb_bo import dbo
 
 COMMANDS = {
     "pred": (pred, "Predict density/energy using Gaussian Process regression"),
@@ -26,6 +27,7 @@ COMMANDS = {
     "ffield": (ffield, "Convert ffield.json to ReaxFF ffield"),
     "molinfo": (molinfo, "Print molecule atom indices for LAMMPS/COLVARS"),
     "md2pdf": (md2pdf, "Convert Markdown to PDF"),
+    "dbo": (dbo, "Plot bond order between two atoms from trajectory"),
 }
 
 
@@ -198,6 +200,15 @@ def main():
     p_md2pdf.add_argument("--i", dest="input", required=True,
                           help="Input file (with or without .md extension)")
 
+    # ── dbo ──
+    p_dbo = sub.add_parser("dbo", help=COMMANDS["dbo"][1])
+    p_dbo.add_argument("--t", "--traj", dest="traj", required=True,
+                       help="Trajectory file")
+    p_dbo.add_argument("--i", type=int, default=0, help="Index of atom i (default: 0)")
+    p_dbo.add_argument("--j", type=int, default=1, help="Index of atom j (default: 1)")
+    p_dbo.add_argument("--d", "--delta", dest="delta", type=int, default=1,
+                       help="Show Delta value (default: 1)")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -263,4 +274,6 @@ def main():
                  verbose=not args.quiet)
     elif args.command == "md2pdf":
         cmd_func(input=args.input)
+    elif args.command == "dbo":
+        cmd_func(traj=args.traj, i=args.i, j=args.j, delta=args.delta)
 

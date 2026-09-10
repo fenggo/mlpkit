@@ -40,4 +40,7 @@ def __getattr__(name):
     if name == "md2pdf":
         from mlpkit.md2pdf import md2pdf as _md2pdf
         return _md2pdf
+    if name == "dbo":
+        from mlpkit.deb_bo import dbo as _dbo
+        return _dbo
     raise AttributeError(f"module 'mlpkit' has no attribute {name!r}")
