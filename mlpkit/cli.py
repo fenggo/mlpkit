@@ -28,6 +28,7 @@ COMMANDS = {
     "molinfo": (molinfo, "Print molecule atom indices for LAMMPS/COLVARS"),
     "md2pdf": (md2pdf, "Convert Markdown to PDF"),
     "dbo": (dbo, "Plot bond order between two atoms from trajectory"),
+    "gmd": (None, "GULP Molecular Dynamics: NVT, optimization, trajectory, plotting"),
 }
 
 
@@ -38,7 +39,7 @@ def main():
     )
     sub = parser.add_subparsers(dest="command", title="commands")
 
-    # ── pred ──
+    # -- pred --
     p_pred = sub.add_parser("pred", help=COMMANDS["pred"][1])
     p_pred.add_argument("--t", default="Individuals.traj", help="Trajectory file")
     p_pred.add_argument("--g", type=str, default=None, help="geometry structure")
@@ -52,7 +53,7 @@ def main():
     p_pred.add_argument("--tolerance", type=float, default=0.001, help="Structure matching tolerance")
     p_pred.add_argument("--c",type=str, default='nn', help="the calculator to be used, aviliable: nn, mtp")
 
-    # ── calc ──
+    # -- calc --
     p_calc = sub.add_parser("calc", help=COMMANDS["calc"][1])
     p_calc.add_argument("--t", default="Individuals.traj", help="Trajectory file")
     p_calc.add_argument("--den", type=float, default=1.88, help="Density threshold")
@@ -62,34 +63,34 @@ def main():
     p_calc.add_argument("--dat", default="data", help="Data directory name")
     p_calc.add_argument("--tolerance", type=float, default=0.01, help="Structure matching tolerance")
 
-    # ── traj ──
+    # -- traj --
     p_traj = sub.add_parser("traj", help=COMMANDS["traj"][1])
     p_traj.add_argument("--fposcar", default="gatheredPOSCARS", help="Input POSCAR file")
 
-    # ── zmat ──
+    # -- zmat --
     p_zmat = sub.add_parser("zmat", help=COMMANDS["zmat"][1])
     p_zmat.add_argument("--geo", default="POSCAR", help="Input geometry file")
     p_zmat.add_argument("--i", type=int, default=-1, help="Frame index")
 
-    # ── fdf ──
+    # -- fdf --
     p_fdf = sub.add_parser("fdf", help=COMMANDS["fdf"][1])
     p_fdf.add_argument("--gen", default="poscar.gen", help="Input .gen file")
     p_fdf.add_argument("--xcf", default="gga", choices=["gga", "vdw"], help="XC functional")
     p_fdf.add_argument("--i", type=int, default=-1, help="Frame index")
 
-    # ── sample ──
+    # -- sample --
     p_sample = sub.add_parser("sample", help=COMMANDS["sample"][1])
     p_sample.add_argument("--ind", default="", help="Indices (space-separated)")
     p_sample.add_argument("--t", default=None, help="Trajectory file")
 
-    # ── calcdata ──
+    # -- calcdata --
     p_calcdata = sub.add_parser("calcdata", help=COMMANDS["calcdata"][1])
     p_calcdata.add_argument("--n",type=int, default=1, help="number cpu tobe used")
     p_calcdata.add_argument("--t", default='structures.traj', help="Trajectory file")
     p_calcdata.add_argument("--step",type=int,  default=1000, help="number of step to used to optimize by MLP")
     p_calcdata.add_argument("--c",type=str, default='nn', help="the calculator to be used, aviliable: nn, mtp")
 
-   # ── gp ──  
+   # -- gp --  
     p_gp = sub.add_parser("gp", help=COMMANDS["gp"][1])
     p_gp.add_argument("--n", type=int, default=1, help="number cpu tobe used")
     p_gp.add_argument("--t",type=float, default=0.005, help="structure match tolerance")
@@ -103,34 +104,34 @@ def main():
     p_gp.add_argument("--data", default='data', help="which data to be used")
     p_gp.add_argument("--ref", default='results1', help="results file directory")
 
- # ── fixbroken ── 
+ # -- fixbroken -- 
     p_fixbroken = sub.add_parser("fixbroken", help=COMMANDS["fixbroken"][1])
     p_fixbroken.add_argument("--n", type=int, default=1, help="number cpu tobe used")
     p_fixbroken.add_argument("--data", default='data', help="which data to be used")
     p_fixbroken.add_argument("--s", type=float,default=1.2, help="scale factor")
     p_fixbroken.add_argument("--b", type=float,default=1.5, help="energy devate the mean tolerance that the structure is broken")
 
- # ── add ── 
+ # -- add -- 
     p_add = sub.add_parser("add", help=COMMANDS["add"][1])
     p_add.add_argument("--n", type=int, default=1, help="number cpu tobe used")
     p_add.add_argument("--s", type=int, default=1000, help="the step of mlp geometry optimization")
     p_add.add_argument("--i", type=int, default=-1, help="the index of the Atoms object in trajectory")
     p_add.add_argument("--tolerance",  type=float,default=0.005, help="match tolerance")
     p_add.add_argument("--t", type=str,default='structures.traj', help="trajector file name")
- # ── update ── 
+ # -- update -- 
     p_update = sub.add_parser("update", help=COMMANDS["update"][1])
     p_update.add_argument("--n", type=int, default=1, help="number cpu tobe used")
     p_update.add_argument("--s", type=int, default=1000, help="the step of mlp geometry optimization")
     p_update.add_argument("--tolerance",  type=float,default=0.005, help="match tolerance")
     p_update.add_argument("--t", type=str,default='structures.traj', help="trajector file name")
     p_update.add_argument("--i", default=None, help="Crystal indices (space-separated)")
- # ── addall ── 
+ # -- addall -- 
     p_addall = sub.add_parser("addall", help=COMMANDS["addall"][1])
     p_addall.add_argument("--n", type=int, default=1, help="number cpu tobe used")
     p_addall.add_argument("--s", type=int, default=1000, help="the step of mlp geometry optimization")
     p_addall.add_argument("--tolerance",  type=float,default=0.005, help="match tolerance")
     p_addall.add_argument("--t", type=str,default='structures.traj', help="trajector file name")
- # ── supercell ── 
+ # -- supercell -- 
     p_supercell = sub.add_parser("supercell", help=COMMANDS["supercell"][1])
     p_supercell.add_argument("--x", type=int, default=1, help="X")
     p_supercell.add_argument("--y", type=int, default=1, help="Y")
@@ -138,7 +139,7 @@ def main():
     p_supercell.add_argument("--t", type=str,default=None, help="trajector file name")
     p_supercell.add_argument("--g", type=str,default=None, help="geometry file name")
 
- # ── info ──
+ # -- info --
     p_info = sub.add_parser("info", help=COMMANDS["info"][1])
     p_info.add_argument("--gen", default=None, help="Geometry file (e.g. POSCAR, gulp.cif)")
     p_info.add_argument("--traj", default=None, help="Trajectory file name")
@@ -150,7 +151,7 @@ def main():
     p_info.add_argument("--symprec", type=float, default=0.1,
                         help="Symmetry tolerance for pymatgen (default: 0.1)")
 
- # ── fingerprint ──
+ # -- fingerprint --
     p_fp = sub.add_parser("fingerprint", help=COMMANDS["fingerprint"][1])
     p_fp.add_argument("--g", default=None, help="Geometry structure file (e.g. POSCAR)")
     p_fp.add_argument("--traj", default=None, help="Trajectory file name")
@@ -175,17 +176,17 @@ def main():
     p_fp.add_argument("--soap-l-max", type=int, default=6,
                       help="SOAP maximum angular momentum")
 
-    # ── lib ──
+    # -- lib --
     p_lib = sub.add_parser("lib", help=COMMANDS["lib"][1])
     p_lib.add_argument("--json", default="ffield.json", help="Path to ffield.json")
     p_lib.add_argument("--lib", default="reaxff_nn.lib", help="Output lib file name")
 
-    # ── ffield ──
+    # -- ffield --
     p_ffield = sub.add_parser("ffield", help=COMMANDS["ffield"][1])
     p_ffield.add_argument("--json", default="ffield.json", help="Path to ffield.json")
     p_ffield.add_argument("--ffield", default="ffield", help="Output ffield file name")
 
-    # ── molinfo ──
+    # -- molinfo --
     p_molinfo = sub.add_parser("molinfo", help=COMMANDS["molinfo"][1])
     p_molinfo.add_argument("--g", "--gen", dest="gen", default="data.traj",
                            help="Geometry file (ASE-readable: traj, POSCAR, lammps-data, etc.)")
@@ -195,12 +196,12 @@ def main():
     p_molinfo.add_argument("--quiet", action="store_true", default=False,
                            help="Suppress verbose output (print only atom indices)")
 
-    # ── md2pdf ──
+    # -- md2pdf --
     p_md2pdf = sub.add_parser("md2pdf", help=COMMANDS["md2pdf"][1])
     p_md2pdf.add_argument("--i", dest="input", required=True,
                           help="Input file (with or without .md extension)")
 
-    # ── dbo ──
+    # -- dbo --
     p_dbo = sub.add_parser("dbo", help=COMMANDS["dbo"][1])
     p_dbo.add_argument("--t", "--traj", dest="traj", required=True,
                        help="Trajectory file")
@@ -208,6 +209,31 @@ def main():
     p_dbo.add_argument("--j", type=int, default=1, help="Index of atom j (default: 1)")
     p_dbo.add_argument("--d", "--delta", dest="delta", type=int, default=1,
                        help="Show Delta value (default: 1)")
+
+    # -- gmd --
+    p_gmd = sub.add_parser("gmd", help=COMMANDS["gmd"][1])
+    p_gmd.add_argument("--nvt", action="store_true", default=False, help="NVT MD simulation")
+    p_gmd.add_argument("--opt", action="store_true", default=False, help="Structure optimization")
+    p_gmd.add_argument("--traj", action="store_true", default=False,
+                        help="Convert his_3D.arc to trajectory")
+    p_gmd.add_argument("--plot", action="store_true", default=False, help="Plot MD results")
+    p_gmd.add_argument("--w", action="store_true", default=False, help="Write GULP input only")
+    p_gmd.add_argument("--T", type=float, default=350.0, help="Temperature (K)")
+    p_gmd.add_argument("--time_step", type=float, default=0.1, help="Time step (fs)")
+    p_gmd.add_argument("--step", type=int, default=100, help="Number of steps")
+    p_gmd.add_argument("--gen", default="poscar.gen", help="Input geometry file")
+    p_gmd.add_argument("--i", type=int, default=-1, help="Frame index")
+    p_gmd.add_argument("--mode", default="w", help="Trajectory write mode")
+    p_gmd.add_argument("--c", type=int, default=0, help="checkMol flag")
+    p_gmd.add_argument("--x", type=int, default=1, help="Supercell X")
+    p_gmd.add_argument("--y", type=int, default=1, help="Supercell Y")
+    p_gmd.add_argument("--z", type=int, default=1, help="Supercell Z")
+    p_gmd.add_argument("--n", type=int, default=1, help="Number of MPI procs for gulp")
+    p_gmd.add_argument("--lib", default="reaxff_nn", help="ReaxFF library")
+    p_gmd.add_argument("--l", type=int, default=0, help="opt: 0=conv, 1=conp")
+    p_gmd.add_argument("--p", type=float, default=0.0, help="Pressure (GPa)")
+    p_gmd.add_argument("--inp", default="inp-gulp", help="Input file (traj mode)")
+    p_gmd.add_argument("--out", default="out", help="Output file prefix (plot mode)")
 
     args = parser.parse_args()
 
@@ -276,4 +302,6 @@ def main():
         cmd_func(input=args.input)
     elif args.command == "dbo":
         cmd_func(traj=args.traj, i=args.i, j=args.j, delta=args.delta)
-
+    elif args.command == "gmd":
+        from mlpkit.gmd import gmd_dispatch
+        gmd_dispatch(args)
