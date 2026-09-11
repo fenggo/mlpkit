@@ -82,6 +82,11 @@ def main():
     p_sample = sub.add_parser("sample", help=COMMANDS["sample"][1])
     p_sample.add_argument("--ind", default="", help="Indices (space-separated)")
     p_sample.add_argument("--t", default=None, help="Trajectory file")
+    p_sample.add_argument("--s", type=int, default=None, help="Start frame")
+    p_sample.add_argument("--e", type=int, default=None, help="End frame")
+    p_sample.add_argument("--i", type=int, default=1, help="Frame interval (default: 1)")
+    p_sample.add_argument("--o", default=None, help="Output trajectory file")
+    p_sample.add_argument("--f", default="", help="Specific frames (space-separated)")
 
     # -- calcdata --
     p_calcdata = sub.add_parser("calcdata", help=COMMANDS["calcdata"][1])
@@ -257,7 +262,7 @@ def main():
     elif args.command == "fdf":
         cmd_func(gen=args.gen, xcf=args.xcf, i=args.i)
     elif args.command == "sample":
-        cmd_func(ind=args.ind, t=args.t)
+        cmd_func(ind=args.ind, t=args.t, s=args.s, e=args.e, i=args.i, o=args.o, f=args.f)
     elif args.command == "calcdata":
         cmd_func(traj=args.t, step=args.step,n=args.n,c=args.c)
     elif args.command == "gp":

@@ -1161,21 +1161,50 @@ def fingerprint(gen=None, traj=None, i=-1,
 #  sample - 采样结构
 # ──────────────────────────────────────────────
 
-def sample(ind="", t=None):
-    """Sample structures by index to samples.traj."""
-    traj_w = TrajectoryWriter("samples.traj", mode="w")
+def sample(ind="", t=None, s=None, e=None, i=1, o=None, f=""):
+    """Sample structures by index or range to a trajectory file.
 
+    Three modes (in priority order):
+      1. --f: explicit frame indices (space-separated)
+      2. --ind: legacy index mode (space-separated)
+      3. --s/--e: range mode (start to end, with interval)
+    """
+    out = o or "samples.traj"
+    traj_w = TrajectoryWriter(out, mode="w")
+
+    # ── Mode 1: explicit frames ──
+    if f:
+        images = Trajectory(t or "md.traj")
+        frames = [int(x) for x in f.split()]
+        for fi in frames:
+            traj_w.write(atoms=images[fi])
+        traj_w.close()
+        return
+
+    # ── Mode 2: legacy index mode ──
     if ind:
-        ids = [int(i) for i in ind.split()]
+        ids = [int(x) for x in ind.split()]
         if t is not None:
             images = Trajectory(t)
-            for i in ids:
-                traj_w.write(atoms=images[i])
+            for fi in ids:
+                traj_w.write(atoms=images[fi])
         else:
-            for i in ids:
-                atoms = read(f"{i}/POSCAR.{i}_opt")
+            for fi in ids:
+                atoms = read(f"{fi}/POSCAR.{fi}_opt")
                 atoms.calc = SinglePointCalculator(atoms, energy=0.0)
                 traj_w.write(atoms=atoms)
+        traj_w.close()
+        return
+
+    # ── Mode 3: range mode ──
+    if s is not None:
+        images = Trajectory(t or "md.traj")
+        end = e + 1 if e is not None else len(images)
+        for fi in range(s, end):
+            if fi % i == 0:
+                traj_w.write(atoms=images[fi])
+        traj_w.close()
+        return
 
     traj_w.close()
 
