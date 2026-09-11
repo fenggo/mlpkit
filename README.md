@@ -39,6 +39,7 @@ pip install .
 | `md2pdf` | 将 Markdown 转换为 PDF |
 | `dbo` | 绘制轨迹中两原子间键级变化 |
 | `gmd` | GULP 分子动力学：NVT、优化、轨迹转换、绘图 |
+| `lmd` | LAMMPS 分子动力学：NVT、NPT、优化、MSST、轨迹转换、绘图 |
 
 ---
 
@@ -555,6 +556,113 @@ mlpkit gmd --plot --out=out
 | `--w` | `inp-gulp`（GULP 输入文件） |
 | `--traj` | `md.traj`（从 his_3D.arc 转换） |
 | `--plot` | 交互式图表（能量/温度/压力） |
+
+---
+
+## 15. `lmd` — LAMMPS 分子动力学
+
+LAMMPS 分子动力学仿真、结构优化、MSST 冲击模拟、轨迹转换和热力学分析。
+
+```bash
+mlpkit lmd --nvt|--npt|--opt|--msst|--traj|--plot|--w [选项...]
+```
+
+### 七种模式（互斥）
+
+| 模式 | 说明 |
+|------|------|
+| `--nvt` | NVT 系综 MD（Nosé-Hoover thermostat） |
+| `--npt` | NPT 系综 MD（各向同性压力耦合） |
+| `--opt` | 结构优化（minimize，能量/力收敛） |
+| `--msst` | MSST 冲击波模拟（多尺度冲击技术） |
+| `--traj` | 将 `lammps.trj` 转换为 ASE 轨迹 |
+| `--plot` | 绘制热力学输出（T/P/E vs 步数） |
+| `--w` | 仅写入 LAMMPS 输入文件（`data.lammps` + `in.lammps`） |
+
+### 通用参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--T` | `350.0` | 温度 (K) |
+| `--time_step` | `0.1` | 时间步长 (fs) |
+| `--step` | `100` | MD/优化步数 |
+| `--gen` | `poscar.gen` | 输入结构文件（ASE 可读） |
+| `--i` | `-1` | 帧索引 |
+| `--model` | `reaxff-nn` | 模型：`reaxff-nn`（ReaxFF）或 `quip`（GAP） |
+| `--lib` | `ffield` | 力场文件（`ffield` 或 GAP XML 路径） |
+| `--x / --y / --z` | `1` | 超胞倍数 |
+| `--n` | `1` | MPI 进程数 |
+| `--c` | `0` | 轨迹恢复标志 |
+| `--dump_interval` | `10` | Dump 输出间隔 |
+| `--free` | `" "` | 自由原子索引（空格分隔） |
+
+### NVT 额外参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--tdump` | `100` | 热浴阻尼参数 |
+| `--r` | `0` | `0` = 写入 data 文件，`1` = 从 restart 继续 |
+
+### NPT 额外参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--p` | `0.0` | 外部压力（各向同性） |
+
+### MSST 额外参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--axis` | `z` | 冲击方向（`x`、`y`、`z`） |
+| `--v` | `8.0` | 冲击速度 (km/s) |
+| `--q` | `100.0` | MSST 压缩参数 |
+
+### Traj / Plot 模式参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--inp` | `in.lammps` | LAMMPS 输入文件（traj 模式） |
+| `--out` | `out` | 输出前缀（plot 模式） |
+| `--s` | `0` | 起始原子 ID（traj 模式） |
+| `--e` | `0` | 结束原子 ID（`0` = 全部） |
+
+### 使用示例
+
+```bash
+# NVT MD：500 K，1000 步
+mlpkit lmd --nvt --T=500 --step=1000 --gen=poscar.gen
+
+# NVT 4 核并行
+mlpkit lmd --nvt --n=4 --gen=poscar.gen
+
+# NPT MD：1 GPa 各向同性压力
+mlpkit lmd --npt --T=300 --p=1.0 --step=2000 --gen=poscar.gen
+
+# 结构优化
+mlpkit lmd --opt --gen=siesta.traj --step=500
+
+# MSST 冲击波模拟（z 方向，8 km/s）
+mlpkit lmd --msst --axis=z --v=8.0 --q=100 --step=5000
+
+# 仅写入输入文件
+mlpkit lmd --w --gen=my.gen
+
+# 转换 traj 并保留破损分子
+mlpkit lmd --traj --c=1
+
+# 绘制热力学结果
+mlpkit lmd --plot
+```
+
+### 输出
+
+| 模式 | 输出 |
+|------|------|
+| `--nvt` / `--npt` / `--msst` | `out` 日志 + `lammps.trj` 轨迹 → `md.traj` |
+| `--opt` | `out` 日志 + `lammps.trj` → `md.traj` |
+| `--w` | `data.lammps` + `in.lammps` |
+| `--traj` | `md.traj`（从 lammps.trj 转换） |
+| `--plot` | 温度/能量/压力 PDF 图标 |
 
 ---
 

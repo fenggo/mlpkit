@@ -29,6 +29,7 @@ COMMANDS = {
     "md2pdf": (md2pdf, "Convert Markdown to PDF"),
     "dbo": (dbo, "Plot bond order between two atoms from trajectory"),
     "gmd": (None, "GULP Molecular Dynamics: NVT, optimization, trajectory, plotting"),
+    "lmd": (None, "LAMMPS Molecular Dynamics: NVT, NPT, opt, MSST, trajectory, plotting"),
 }
 
 
@@ -240,6 +241,42 @@ def main():
     p_gmd.add_argument("--inp", default="inp-gulp", help="Input file (traj mode)")
     p_gmd.add_argument("--out", default="out", help="Output file prefix (plot mode)")
 
+    # -- lmd --
+    p_lmd = sub.add_parser("lmd", help=COMMANDS["lmd"][1])
+    p_lmd.add_argument("--nvt", action="store_true", default=False, help="NVT MD simulation")
+    p_lmd.add_argument("--npt", action="store_true", default=False, help="NPT MD simulation")
+    p_lmd.add_argument("--opt", action="store_true", default=False, help="Geometry optimization (minimize)")
+    p_lmd.add_argument("--msst", action="store_true", default=False, help="MSST shock simulation")
+    p_lmd.add_argument("--traj", dest="lmd_traj", action="store_true", default=False,
+                       help="Convert lammps.trj to ASE trajectory")
+    p_lmd.add_argument("--plot", dest="lmd_plot", action="store_true", default=False,
+                       help="Plot LAMMPS thermal output")
+    p_lmd.add_argument("--w", action="store_true", default=False, help="Write LAMMPS input only")
+    p_lmd.add_argument("--T", type=float, default=350.0, help="Temperature (K)")
+    p_lmd.add_argument("--tdump", type=int, default=100, help="Thermostat damping parameter")
+    p_lmd.add_argument("--time_step", type=float, default=0.1, help="Time step (fs)")
+    p_lmd.add_argument("--step", type=int, default=100, help="Number of steps")
+    p_lmd.add_argument("--gen", default="poscar.gen", help="Input geometry file")
+    p_lmd.add_argument("--i", type=int, default=-1, help="Frame index")
+    p_lmd.add_argument("--model", default="reaxff-nn", help="Model type: reaxff-nn, quip")
+    p_lmd.add_argument("--c", type=int, default=0, help="recover flag")
+    p_lmd.add_argument("--free", default=" ", help="Free atom indices (space-separated)")
+    p_lmd.add_argument("--dump_interval", type=int, default=10, help="Dump interval")
+    p_lmd.add_argument("--x", type=int, default=1, help="Supercell X")
+    p_lmd.add_argument("--y", type=int, default=1, help="Supercell Y")
+    p_lmd.add_argument("--z", type=int, default=1, help="Supercell Z")
+    p_lmd.add_argument("--n", type=int, default=1, help="Number of MPI procs")
+    p_lmd.add_argument("--lib", default="ffield", help="ReaxFF force field file")
+    p_lmd.add_argument("--p", type=float, default=0.0, help="Pressure (NPT mode)")
+    p_lmd.add_argument("--r", type=int, default=0, help="Restart flag: 0=data, 1=restart")
+    p_lmd.add_argument("--axis", default="z", help="MSST shock direction (x, y, z)")
+    p_lmd.add_argument("--v", type=float, default=8.0, help="MSST shock velocity (km/s)")
+    p_lmd.add_argument("--q", type=float, default=100.0, help="MSST q parameter")
+    p_lmd.add_argument("--s", type=int, default=0, help="Traj start atom")
+    p_lmd.add_argument("--e", type=int, default=0, help="Traj end atom")
+    p_lmd.add_argument("--inp", default="in.lammps", help="Input file (traj mode)")
+    p_lmd.add_argument("--out", default="out", help="Output prefix (plot mode)")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -310,3 +347,6 @@ def main():
     elif args.command == "gmd":
         from mlpkit.gmd import gmd_dispatch
         gmd_dispatch(args)
+    elif args.command == "lmd":
+        from mlpkit.lmd import lmd_dispatch
+        lmd_dispatch(args)
