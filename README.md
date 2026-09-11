@@ -28,9 +28,17 @@ pip install .
 | `addall` | 将轨迹中所有结构批量添加到特征数据库 |
 | `zmat` | 结构坐标转 USPEX Z-matrix 内坐标 |
 | `fdf` | 生成 SIESTA 输入文件 |
-| `sample` | 按索引采样结构输出到轨迹 |
+| `sample` | 按索引或范围从轨迹采样结构 |
 | `supercell` | 构建超胞 |
+| `update` | 更新数据库中的结构 |
+| `info` | 打印结构的能量和晶格信息 |
 | `fingerprint` | 计算 USPEX 分子结构指纹（Cython 加速） |
+| `lib` | 将 ffield.json 转换为 reaxff_nn.lib |
+| `ffield` | 将 ffield.json 转换为 ReaxFF ffield |
+| `molinfo` | 打印分子原子索引（LAMMPS/COLVARS 用） |
+| `md2pdf` | 将 Markdown 转换为 PDF |
+| `dbo` | 绘制轨迹中两原子间键级变化 |
+| `gmd` | GULP 分子动力学：NVT、优化、轨迹转换、绘图 |
 
 ---
 
@@ -339,22 +347,48 @@ mlpkit fdf [--gen GEN] [--xcf XCF] [--i INDEX]
 
 ## 11. `sample` — 采样结构
 
-按索引从轨迹或 DFT 结果目录中提取指定结构。
+按索引、帧号列表或范围从轨迹中采样结构。
 
 ```bash
-mlpkit sample [--ind INDICES] [--t TRAJ]
+mlpkit sample [--ind INDICES] [--t TRAJ] [--s START] [--e END] [--i INTERVAL] [--o OUTPUT] [--f FRAMES]
 ```
+
+### 三种模式（优先级从高到低）
+
+| 模式 | 参数 | 说明 |
+|------|------|------|
+| 显式帧号 | `--f` | 空格分隔的帧索引列表 |
+| Legacy 索引 | `--ind` | 空格分隔的索引列表（兼容旧用法） |
+| 范围模式 | `--s / --e / --i` | 按起始帧→结束帧，每隔 interval 帧采样 |
 
 ### 参数
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
+| `--t` | `None` | 输入轨迹文件 |
 | `--ind` | `""` | 结构索引（空格分隔），如 `"0 5 12"` |
-| `--t` | `None` | 轨迹文件路径。若指定则从轨迹中提取；若不指定则从 `{i}/POSCAR.{i}_opt` 中读取 |
+| `--s` | `None` | 起始帧索引 |
+| `--e` | `None` | 结束帧索引（含） |
+| `--i` | `1` | 采样间隔 |
+| `--o` | `None` | 输出轨迹文件路径（默认 `samples.traj`） |
+| `--f` | `""` | 显式帧号（空格分隔），如 `"1 3 10 15"` |
 
 ### 输出
 
-- `samples.traj` — 采样的结构轨迹
+- `samples.traj`（或通过 `--o` 指定）— 采样后的结构轨迹
+
+### 使用示例
+
+```bash
+# 范围模式：帧 1~20，每隔 2 帧采样
+mlpkit sample --s=1 --e=20 --i=2 --t=md.traj --o=samples.traj
+
+# 显式帧号：提取指定帧
+mlpkit sample --t=md.traj --f="0 5 10 15" --o=selected.traj
+
+# Legacy 索引模式（兼容旧用法）
+mlpkit sample --ind="0 1 2" --t=structures.traj
+```
 
 ---
 
@@ -432,6 +466,95 @@ mlpkit fingerprint --traj=Individuals.traj --i=-1
    - `order` (N,)：每个原子的结构序参量（√(Σ weight·δ·atom_fing²/V^(1/3))）
    - `fing` (S², numBins)：全局指纹矩阵（S = 元素种类数）
    - `atom_fing` (N, S, numBins)：原子级指纹
+
+---
+
+## 14. `gmd` — GULP 分子动力学
+
+GULP MD 仿真、结构优化、轨迹转换和结果绘图。
+
+```bash
+mlpkit gmd --nvt|--opt|--traj|--plot|--w [选项...]
+```
+
+### 五种模式（互斥）
+
+| 模式 | 说明 |
+|------|------|
+| `--nvt` | NVT 系综分子动力学仿真 |
+| `--opt` | 结构优化（GULP gradient + Hessian） |
+| `--traj` | 将 GULP 输出 `his_3D.arc` 转换为 ASE 轨迹 |
+| `--plot` | 绘制 MD 结果（能量/温度/压力 vs 步数） |
+| `--w` | 仅写入 GULP 输入文件，不执行计算 |
+
+### 通用参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--T` | `350.0` | 温度 (K) |
+| `--step` | `100` | 步数（MD 步数或优化最大循环） |
+| `--gen` | `poscar.gen` | 输入结构文件（ASE 可读） |
+| `--i` | `-1` | 帧索引 |
+| `--x / --y / --z` | `1` | 超胞倍数 |
+| `--n` | `1` | MPI 进程数（并行 gulp） |
+| `--lib` | `reaxff_nn` | ReaxFF 力场库名称 |
+| `--c` | `0` | checkMol 标志 |
+
+### NVT 模式额外参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--time_step` | `0.1` | 时间步长 (fs) |
+| `--mode` | `w` | 轨迹写入模式 |
+
+### Opt 模式额外参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--l` | `0` | 优化类型：`0` = conv（恒容），`1` = conp（恒压） |
+| `--p` | `0.0` | 外部压力 (GPa)，> 0 自动启用 conp |
+
+### Traj / Plot 模式参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--inp` | `inp-gulp` | GULP 输入文件（traj 模式） |
+| `--out` | `out` | 输出文件前缀（plot 模式） |
+
+### 使用示例
+
+```bash
+# NVT MD：500 K，1000 步，步长 0.1 fs
+mlpkit gmd --nvt --T=500 --step=1000 --time_step=0.1 --gen=poscar.gen
+
+# NVT 4 核并行
+mlpkit gmd --nvt --n=4 --gen=poscar.gen
+
+# 恒容优化
+mlpkit gmd --opt --gen=siesta.traj --step=200
+
+# 恒压优化（0.5 GPa）
+mlpkit gmd --opt --l=1 --p=0.5 --gen=siesta.traj
+
+# 仅写入输入文件（不运行）
+mlpkit gmd --w --gen=my.gen --lib=reaxff_nn
+
+# 转换 arc 到 traj
+mlpkit gmd --traj --c=1
+
+# 绘制 MD 结果
+mlpkit gmd --plot --out=out
+```
+
+### 输出
+
+| 模式 | 输出 |
+|------|------|
+| `--nvt` | `gulp.out` 输出 + `md.traj` 轨迹 (xyz → traj) |
+| `--opt` | `gulp.out` + `md.traj` (his_3D.arc → traj) |
+| `--w` | `inp-gulp`（GULP 输入文件） |
+| `--traj` | `md.traj`（从 his_3D.arc 转换） |
+| `--plot` | 交互式图表（能量/温度/压力） |
 
 ---
 
