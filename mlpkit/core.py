@@ -1401,26 +1401,34 @@ def _force_stats(atoms):
     }
 
 
-def _bond_stats(atoms, max_bond_dist=2.0, stretch_factor=1.15):
-    """断键统计: (stretched, broken, close_pairs)."""
+def _bond_stats(atoms, stretch_factor=1.15):
+    """断键统计: (stretched, broken, close_pairs).
+
+    只检查已知共价键元素对, 截断半径用 max_ok * 1.3 (如 H-H: 0.90*1.3=1.17Å),
+    避免把分子间弱接触误判为断键.
+    """
     from ase.geometry import get_distances
     natoms = len(atoms)
     D, D_len = get_distances(atoms.positions, cell=atoms.cell, pbc=atoms.pbc)
     stretched, broken, close = 0, 0, 0
     for i in range(natoms):
         row = D_len[i]
+        si = atoms.symbols[i]
         for j in range(i + 1, natoms):
+            sj = atoms.symbols[j]
+            key = (si, sj) if si <= sj else (sj, si)
+            if key not in _COVALENT_BONDS:
+                continue
+            ref, max_ok = _COVALENT_BONDS[key]
+            # 截断: 共价键上限的 1.3 倍 — 超出此距离不可能是键
             d = row[j]
-            if d > max_bond_dist:
+            if d > max_ok * 1.3:
                 continue
             close += 1
-            si, sj = sorted([atoms.symbols[i], atoms.symbols[j]])
-            if (si, sj) in _COVALENT_BONDS:
-                ref, max_ok = _COVALENT_BONDS[(si, sj)]
-                if d > max_ok:
-                    broken += 1
-                elif d > ref * stretch_factor:
-                    stretched += 1
+            if d > max_ok:
+                broken += 1
+            elif d > ref * stretch_factor:
+                stretched += 1
     return stretched, broken, close
 
 
@@ -1458,9 +1466,11 @@ def _stability_score(fstats, bstats, dstats, baselines):
         score += min(hp_delta / 5, 6.0)
         flags.append(f'hF+{hp_delta:.0f}%')
 
+    # 3. 断键数 — 必须与力异常同时满足才算真失稳
     bdelta = bstats[1] - baselines['broken_mean']
-    if bdelta > 0:
-        score += bdelta * 2.0
+    if bdelta >= 3.0 and fz > 3.0:
+        # 力+键同时异常 = 真实失稳信号, 信号越强权重越高
+        score += bdelta + max(fz - 3.0, 0)
         flags.append(f'Br+{bdelta}')
 
     if dstats is not None and baselines.get('max_disp_mean', 0) > 0:
@@ -1544,8 +1554,8 @@ def _parse_lammps_dump(path, max_frames=None):
 
 
 def critical(dump='meta_nvt.lammpstrj', log=None, output='critical.traj',
-             score_threshold=3.0, crash_score=30.0, baseline_frames=10,
-             one_per_run=True):
+             score_threshold=5.0, crash_score=50.0, baseline_frames=10,
+             one_per_run=True, min_persist=3):
     """多信号综合评判提取 MD 失稳帧 (力 + 键长 + 位移).
 
     用法:
@@ -1560,6 +1570,7 @@ def critical(dump='meta_nvt.lammpstrj', log=None, output='critical.traj',
       crash_score:      评分超过此值视为崩溃, 丢弃该帧及后续
       baseline_frames:  用于计算基线的前 N 帧
       one_per_run:      只取第一个失稳帧
+      min_persist:      需连续 N 帧超阈值才确认, 过滤瞬时波动 (默认3)
     """
     from ase.io import write as ase_write
 
@@ -1607,49 +1618,61 @@ def critical(dump='meta_nvt.lammpstrj', log=None, output='critical.traj',
     frames, crashed, taken = [], False, False
     prev = None
     total, after_crash, n_anom = 0, 0, 0
-    score_history = []
+    trig_count = 0
+    candidate_atoms = None
 
     for atoms in _parse_lammps_dump(dump):
-        total += 1
-        fs = _force_stats(atoms)
-        if fs is None:
-            prev = atoms; continue
-        bs = _bond_stats(atoms)
-        ds = _disp_stats(atoms, prev)
-        score, flags = _stability_score(fs, bs, ds, baselines)
-        step = atoms.info.get('timestep', total)
+            total += 1
+            fs = _force_stats(atoms)
+            if fs is None:
+                prev = atoms; continue
+            bs = _bond_stats(atoms)
+            ds = _disp_stats(atoms, prev)
+            score, flags = _stability_score(fs, bs, ds, baselines)
+            step = atoms.info.get('timestep', total)
 
-        if not crashed and score > crash_score:
-            crashed = True
-            print(f'💥 崩溃: step {step} score={score:.1f} [{", ".join(flags)}]')
-        if crashed:
-            after_crash += 1
-            prev = atoms; continue
+            if not crashed and score > crash_score:
+                crashed = True
+                print(f'💥 崩溃: step {step} score={score:.1f} [{", ".join(flags)}]')
+                trig_count = 0; candidate_atoms = None
+            if crashed:
+                after_crash += 1
+                prev = atoms; continue
 
-        is_anom = score > score_threshold
-        if is_anom and one_per_run and taken:
-            after_crash += 1
-            prev = atoms; continue
+            is_anom = score > score_threshold
+            if is_anom and one_per_run and taken:
+                after_crash += 1
+                prev = atoms; continue
 
-        if is_anom:
-            taken = True
-            atoms.info['maxF'] = fs['maxF']
-            atoms.info['meanF'] = fs['meanF']
-            atoms.info['broken_bonds'] = bs[1]
-            atoms.info['class'] = 'anomalous'
-            atoms.info['score'] = score
-            atoms.info['source'] = dump
-            # 挂 calculator 保证 get_potential_energy() 可用
-            atoms.calc = SinglePointCalculator(
-                atoms, energy=atoms.info.get('energy', 0.0),
-                forces=atoms.arrays.get('forces', None))
-            frames.append(atoms)
-            n_anom += 1
-            print(f'⚠️  失稳帧: step {step} '
-                  f'maxF={fs["maxF"]:.1f} broken={bs[1]} '
-                  f'score={score:.1f} [{", ".join(flags)}]')
+            if is_anom:
+                trig_count += 1
+                if candidate_atoms is None:
+                    candidate_atoms = atoms
+            else:
+                trig_count = 0
+                candidate_atoms = None
 
-        prev = atoms
+            if trig_count >= min_persist and not taken:
+                taken = True
+                a = candidate_atoms.copy()
+                fs0 = _force_stats(candidate_atoms)
+                bs0 = _bond_stats(candidate_atoms)
+                a.info['maxF'] = fs0['maxF'] if fs0 else 0
+                a.info['meanF'] = fs0['meanF'] if fs0 else 0
+                a.info['broken_bonds'] = bs0[1] if bs0 else 0
+                a.info['class'] = 'anomalous'
+                a.info['score'] = score
+                a.info['source'] = dump
+                a.calc = SinglePointCalculator(
+                    a, energy=a.info.get('energy', 0.0),
+                    forces=a.arrays.get('forces', None))
+                frames.append(a)
+                n_anom += 1
+                print(f'⚠️  失稳帧: step {candidate_atoms.info.get("timestep")} '
+                      f'maxF={a.info["maxF"]:.1f} broken={a.info["broken_bonds"]} '
+                      f'(连续 {trig_count} 帧, 当前 score={score:.1f})')
+
+            prev = atoms
 
     if not frames:
         print('⚠️  没有提取到失稳帧!')
