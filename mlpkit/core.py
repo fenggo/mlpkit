@@ -1370,3 +1370,292 @@ def molinfo(gen="data.traj", i=-1, jsonfile=None, verbose=True):
 
     return mols
 
+# ──────────────────────────────────────────────
+#  critical — 多信号综合评判提取 MD 失稳帧
+# ──────────────────────────────────────────────
+
+# 共价键参考长度 (C-H-N-O 含能材料体系)
+_COVALENT_BONDS = {
+    ('C','C'): (1.54, 1.80), ('C','H'): (1.09, 1.20),
+    ('C','N'): (1.47, 1.65), ('C','O'): (1.43, 1.55),
+    ('N','N'): (1.45, 1.65), ('N','O'): (1.40, 1.60),
+    ('O','O'): (1.48, 1.65), ('H','N'): (1.01, 1.15),
+    ('H','O'): (0.97, 1.10), ('H','H'): (0.74, 0.90),
+}
+
+# LAMMPS real → ASE 单位转换因子
+_REAL_FORCE_TO_ASE = 0.043364   # kcal/mol/Å → eV/Å
+_REAL_ENERGY_TO_ASE = 0.043364  # kcal/mol → eV
+
+
+def _force_stats(atoms):
+    """力的统计量: max, mean, std, highF%原子占比."""
+    if 'forces' not in atoms.arrays:
+        return None
+    fn = np.linalg.norm(atoms.arrays['forces'], axis=1)
+    return {
+        'maxF': float(np.max(fn)),
+        'meanF': float(np.mean(fn)),
+        'stdF': float(np.std(fn)),
+        'pct_highF': float(np.mean(fn > 1.5 * np.mean(fn))) * 100,
+    }
+
+
+def _bond_stats(atoms, max_bond_dist=2.0, stretch_factor=1.15):
+    """断键统计: (stretched, broken, close_pairs)."""
+    from ase.geometry import get_distances
+    natoms = len(atoms)
+    D, D_len = get_distances(atoms.positions, cell=atoms.cell, pbc=atoms.pbc)
+    stretched, broken, close = 0, 0, 0
+    for i in range(natoms):
+        row = D_len[i]
+        for j in range(i + 1, natoms):
+            d = row[j]
+            if d > max_bond_dist:
+                continue
+            close += 1
+            si, sj = sorted([atoms.symbols[i], atoms.symbols[j]])
+            if (si, sj) in _COVALENT_BONDS:
+                ref, max_ok = _COVALENT_BONDS[(si, sj)]
+                if d > max_ok:
+                    broken += 1
+                elif d > ref * stretch_factor:
+                    stretched += 1
+    return stretched, broken, close
+
+
+def _disp_stats(atoms, prev):
+    """帧间位移统计 (近似速度): max_disp, rmsd."""
+    if prev is None:
+        return None
+    disp = atoms.positions - prev.positions
+    norms = np.linalg.norm(disp, axis=1)
+    return {
+        'max_disp': float(np.max(norms)),
+        'rmsd': float(np.sqrt(np.mean(np.sum(disp**2, axis=1)))),
+    }
+
+
+def _stability_score(fstats, bstats, dstats, baselines):
+    """综合稳定性评分 (0=正常, 越高越不稳定).
+
+    信号与权重:
+      断键增量  — 权重最高 (每断键 +2)
+      highF% 增量  — 力分布变宽
+      maxF Z-score — 力偏离基线
+      max_disp Z-score — 原子位移
+      RMSD Z-score — 全局漂移确认
+    """
+    score, flags = 0.0, []
+
+    fz = (fstats['maxF'] - baselines['maxF_mean']) / max(baselines['maxF_std'], 1e-6)
+    if fz > 2.0:
+        score += min(fz - 2.0, 8.0)
+        flags.append(f'F{fz:.1f}')
+
+    hp_delta = fstats['pct_highF'] - baselines['highF_mean']
+    if hp_delta > baselines['highF_std'] * 2:
+        score += min(hp_delta / 5, 6.0)
+        flags.append(f'hF+{hp_delta:.0f}%')
+
+    bdelta = bstats[1] - baselines['broken_mean']
+    if bdelta > 0:
+        score += bdelta * 2.0
+        flags.append(f'Br+{bdelta}')
+
+    if dstats is not None and baselines.get('max_disp_mean', 0) > 0:
+        dz = (dstats['max_disp'] - baselines['max_disp_mean']) / max(baselines['max_disp_std'], 1e-8)
+        if dz > 3.0:
+            score += min(dz - 3.0, 5.0)
+            flags.append(f'D{dz:.1f}')
+
+    if dstats is not None and baselines.get('rmsd_mean', 0) > 0:
+        rz = (dstats['rmsd'] - baselines['rmsd_mean']) / max(baselines['rmsd_std'], 1e-8)
+        if rz > 5.0:
+            score += min(rz - 5.0, 3.0)
+            flags.append(f'R{rz:.1f}')
+
+    return score, flags
+
+
+def _parse_lammps_dump(path, max_frames=None):
+    """解析 LAMMPS dump 文件, 生成 Atoms (forces 转 eV/Å, triclinic cell)."""
+    from ase import Atoms as AseAtoms
+    elem_map = {1: 'C', 2: 'H', 3: 'N', 4: 'O'}
+
+    with open(path) as f:
+        lines = f.readlines()
+    i, N, n = 0, len(lines), 0
+
+    while i < N:
+        if not lines[i].startswith('ITEM: TIMESTEP'):
+            i += 1; continue
+        step = int(lines[i + 1].strip()); i += 2
+        natoms = int(lines[i + 1].strip()); i += 2
+        # BOX BOUNDS
+        tilt_labels = lines[i].split()[3:]
+        bounds = []
+        for _ in range(3):
+            bounds.append([float(x) for x in lines[i + 1].split()]); i += 1
+        i += 1  # blank
+        cols = lines[i].split()[2:]; i += 1
+
+        diagdisp = np.array([bounds[0][0], bounds[0][1],
+                             bounds[1][0], bounds[1][1],
+                             bounds[2][0], bounds[2][1]])
+        if len(bounds[0]) > 2 and len(tilt_labels) >= 3:
+            offdiag = np.array([b[2] for b in bounds])
+            order = [tilt_labels.index(t) for t in ('xy', 'xz', 'yz')]
+            offdiag = offdiag[order]
+        else:
+            offdiag = np.zeros(3)
+        xlo, xhi, ylo, yhi, zlo, zhi = diagdisp
+        xy, xz, yz = offdiag
+        cell = np.array([[xhi - xlo - abs(xy) - abs(xz), 0, 0],
+                         [xy, yhi - ylo - abs(yz), 0],
+                         [xz, yz, zhi - zlo]])
+
+        ix = cols.index('xu') if 'xu' in cols else cols.index('x')
+        iy = cols.index('yu') if 'yu' in cols else cols.index('y')
+        iz = cols.index('zu') if 'zu' in cols else cols.index('z')
+        itype = cols.index('type') if 'type' in cols else None
+        has_f = 'fx' in cols
+
+        symbols, pos, forces = [], [], None
+        for _ in range(natoms):
+            p = lines[i].split(); i += 1
+            symbols.append(elem_map.get(int(p[itype]), 'X') if itype else 'X')
+            pos.append([float(p[ix]), float(p[iy]), float(p[iz])])
+            if has_f:
+                if forces is None:
+                    forces = []
+                forces.append([float(p[cols.index('fx')]),
+                               float(p[cols.index('fy')]),
+                               float(p[cols.index('fz')])])
+
+        atoms = AseAtoms(symbols=symbols, positions=np.array(pos), cell=cell, pbc=[True]*3)
+        if forces is not None:
+            atoms.set_array('forces', np.array(forces) * _REAL_FORCE_TO_ASE)
+        atoms.info['timestep'] = step
+        yield atoms
+        n += 1
+        if max_frames and n >= max_frames:
+            break
+
+
+def critical(dump='meta_nvt.lammpstrj', log=None, output='critical.traj',
+             score_threshold=3.0, crash_score=30.0, baseline_frames=10,
+             one_per_run=True):
+    """多信号综合评判提取 MD 失稳帧 (力 + 键长 + 位移).
+
+    用法:
+      mlpkit critical --dump meta_nvt.lammpstrj --log lmp.log \\
+              --threshold 3.0 --crash 30.0 -o critical.traj
+
+    参数:
+      dump:             LAMMPS dump 文件路径
+      log:              LAMMPS log 文件 (读取 E_pair, 可选)
+      output:           输出 trajectory 文件
+      score_threshold:  评分超过此值标记为失稳帧
+      crash_score:      评分超过此值视为崩溃, 丢弃该帧及后续
+      baseline_frames:  用于计算基线的前 N 帧
+      one_per_run:      只取第一个失稳帧
+    """
+    from ase.io import write as ase_write
+
+    if not exists(dump):
+        print(f'❌ dump 不存在: {dump}')
+        return
+
+    # ── 基线 ──
+    base_fstats, base_bstats, base_dstats = [], [], []
+    prev = None
+    for atoms in _parse_lammps_dump(dump, baseline_frames):
+        fs = _force_stats(atoms)
+        if fs is None:
+            continue
+        base_fstats.append(fs)
+        base_bstats.append(_bond_stats(atoms))
+        ds = _disp_stats(atoms, prev)
+        if ds is not None:
+            base_dstats.append(ds)
+        prev = atoms
+
+    if not base_fstats:
+        print('❌ 无法读取帧 (无 force 信息)')
+        return
+
+    baselines = {
+        'maxF_mean': float(np.mean([f['maxF'] for f in base_fstats])),
+        'maxF_std':  float(np.std([f['maxF'] for f in base_fstats])),
+        'highF_mean': float(np.mean([f['pct_highF'] for f in base_fstats])),
+        'highF_std':  float(np.std([f['pct_highF'] for f in base_fstats])),
+        'broken_mean': float(np.mean([b[1] for b in base_bstats])),
+    }
+    if base_dstats:
+        baselines['max_disp_mean'] = float(np.mean([d['max_disp'] for d in base_dstats]))
+        baselines['max_disp_std']  = float(np.std([d['max_disp'] for d in base_dstats]))
+        baselines['rmsd_mean'] = float(np.mean([d['rmsd'] for d in base_dstats]))
+        baselines['rmsd_std']  = float(np.std([d['rmsd'] for d in base_dstats]))
+
+    print(f'📊 基线 ({len(base_fstats)} 帧): '
+          f'maxF={baselines["maxF_mean"]:.1f}±{baselines["maxF_std"]:.1f}, '
+          f'断键均={baselines["broken_mean"]:.0f}')
+    print(f'   异常阈值={score_threshold}, 崩溃阈值={crash_score}')
+
+    # ── 扫描 ──
+    frames, crashed, taken = [], False, False
+    prev = None
+    total, after_crash, n_anom = 0, 0, 0
+    score_history = []
+
+    for atoms in _parse_lammps_dump(dump):
+        total += 1
+        fs = _force_stats(atoms)
+        if fs is None:
+            prev = atoms; continue
+        bs = _bond_stats(atoms)
+        ds = _disp_stats(atoms, prev)
+        score, flags = _stability_score(fs, bs, ds, baselines)
+        step = atoms.info.get('timestep', total)
+
+        if not crashed and score > crash_score:
+            crashed = True
+            print(f'💥 崩溃: step {step} score={score:.1f} [{", ".join(flags)}]')
+        if crashed:
+            after_crash += 1
+            prev = atoms; continue
+
+        is_anom = score > score_threshold
+        if is_anom and one_per_run and taken:
+            after_crash += 1
+            prev = atoms; continue
+
+        if is_anom:
+            taken = True
+            atoms.info['maxF'] = fs['maxF']
+            atoms.info['meanF'] = fs['meanF']
+            atoms.info['broken_bonds'] = bs[1]
+            atoms.info['class'] = 'anomalous'
+            atoms.info['score'] = score
+            atoms.info['source'] = dump
+            # 挂 calculator 保证 get_potential_energy() 可用
+            atoms.calc = SinglePointCalculator(
+                atoms, energy=atoms.info.get('energy', 0.0),
+                forces=atoms.arrays.get('forces', None))
+            frames.append(atoms)
+            n_anom += 1
+            print(f'⚠️  失稳帧: step {step} '
+                  f'maxF={fs["maxF"]:.1f} broken={bs[1]} '
+                  f'score={score:.1f} [{", ".join(flags)}]')
+
+        prev = atoms
+
+    if not frames:
+        print('⚠️  没有提取到失稳帧!')
+        return
+
+    ase_write(output, frames)
+    print(f'\n✅ {output}: {len(frames)} 帧 '
+          f'(扫描 {total} 帧, 丢弃崩溃后 {after_crash} 帧)')
+

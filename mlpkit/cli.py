@@ -3,7 +3,7 @@
 import argparse
 import sys
 import numpy as np
-from mlpkit.core import pred, calc, traj, zmat, fdf, sample,calcdata,gp,fixbroken,add,addall,supercell,update,info,fingerprint,lib,ffield,molinfo
+from mlpkit.core import pred, calc, traj, zmat, fdf, sample,calcdata,gp,fixbroken,add,addall,supercell,update,info,fingerprint,lib,ffield,molinfo,critical
 from mlpkit.md2pdf import md2pdf
 from mlpkit.deb_bo import dbo
 
@@ -26,6 +26,7 @@ COMMANDS = {
     "lib": (lib, "Convert ffield.json to reaxff_nn.lib"),
     "ffield": (ffield, "Convert ffield.json to ReaxFF ffield"),
     "molinfo": (molinfo, "Print molecule atom indices for LAMMPS/COLVARS"),
+    "critical": (critical, "Extract critical frames from MD: multi-signal scoring"),
     "md2pdf": (md2pdf, "Convert Markdown to PDF"),
     "dbo": (dbo, "Plot bond order between two atoms from trajectory"),
     "gmd": (None, "GULP Molecular Dynamics: NVT, optimization, trajectory, plotting"),
@@ -207,6 +208,20 @@ def main():
     p_md2pdf.add_argument("--i", dest="input", required=True,
                           help="Input file (with or without .md extension)")
 
+    # -- critical --
+    p_critical = sub.add_parser("critical", help=COMMANDS["critical"][1])
+    p_critical.add_argument("--dump", default="meta_nvt.lammpstrj", help="LAMMPS dump file")
+    p_critical.add_argument("--log", default=None, help="LAMMPS log file (optional)")
+    p_critical.add_argument("-o", "--output", default="critical.traj", help="Output trajectory")
+    p_critical.add_argument("--threshold", type=float, default=3.0, dest="score_threshold",
+                           help="Stability score anomaly threshold (default: 3.0)")
+    p_critical.add_argument("--crash", type=float, default=30.0, dest="crash_score",
+                           help="Crash score threshold (default: 30.0)")
+    p_critical.add_argument("--baseline", type=int, default=10, dest="baseline_frames",
+                           help="Frames for baseline stats (default: 10)")
+    p_critical.add_argument("--all", action="store_false", dest="one_per_run",
+                           help="Extract all anomalous frames (default: first only)")
+
     # -- dbo --
     p_dbo = sub.add_parser("dbo", help=COMMANDS["dbo"][1])
     p_dbo.add_argument("--t", "--traj", dest="traj", required=True,
@@ -345,6 +360,10 @@ def main():
         cmd_func(input=args.input)
     elif args.command == "dbo":
         cmd_func(traj=args.traj, i=args.i, j=args.j, delta=args.delta)
+    elif args.command == "critical":
+        cmd_func(dump=args.dump, log=args.log, output=args.output,
+                 score_threshold=args.score_threshold, crash_score=args.crash_score,
+                 baseline_frames=args.baseline_frames, one_per_run=args.one_per_run)
     elif args.command == "gmd":
         from mlpkit.gmd import gmd_dispatch
         gmd_dispatch(args)
