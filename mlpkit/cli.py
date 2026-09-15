@@ -213,16 +213,16 @@ def main():
     p_critical.add_argument("--dump", default="meta_nvt.lammpstrj", help="LAMMPS dump file")
     p_critical.add_argument("--log", default=None, help="LAMMPS log file (optional)")
     p_critical.add_argument("-o", "--output", default="critical.traj", help="Output trajectory")
-    p_critical.add_argument("--threshold", type=float, default=5.0, dest="score_threshold",
-                           help="Stability score anomaly threshold (default: 5.0)")
+    p_critical.add_argument("--threshold", type=float, default=3.0, dest="score_threshold",
+                           help="Stability score anomaly threshold (default: 3.0)")
     p_critical.add_argument("--crash", type=float, default=50.0, dest="crash_score",
                            help="Crash score threshold (default: 50.0)")
     p_critical.add_argument("--baseline", type=int, default=10, dest="baseline_frames",
                            help="Frames for baseline stats (default: 10)")
     p_critical.add_argument("--all", action="store_false", dest="one_per_run",
                            help="Extract all anomalous frames (default: first only)")
-    p_critical.add_argument("--persist", type=int, default=3, dest="min_persist",
-                           help="Consecutive frames above threshold to confirm (default: 3)")
+    p_critical.add_argument("--persist", type=int, default=5, dest="min_persist",
+                           help="Consecutive frames above threshold to confirm (default: 5)")
 
     # -- dbo --
     p_dbo = sub.add_parser("dbo", help=COMMANDS["dbo"][1])
