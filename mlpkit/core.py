@@ -1449,35 +1449,48 @@ def _stability_score(fstats, bstats, dstats, baselines):
     """综合稳定性评分 (0=正常, 越高越不稳定).
 
     信号与权重:
-      断键增量 (broken)  — 键断裂
+      断键增量 (broken)  — 键断裂, 最可靠信号
       塌缩增量 (collapsed) — 新键形成/原子碰撞
-      maxF Z-score — 力偏离基线
-      highF% 增量  — 力分布变宽
+      maxF Z-score — 力偏离基线 (辅助, 不能单独触发)
+      highF% 增量  — 力分布变宽 (辅助)
       max_disp Z-score — 原子位移
       RMSD Z-score — 全局漂移确认
     """
     score, flags = 0.0, []
 
+    # ── 力信号: cap 在阈值以下, 纯力不能单独触发 (避免 ReaxFF 假阳性) ──
     fz = (fstats['maxF'] - baselines['maxF_mean']) / max(baselines['maxF_std'], 0.5)
     if fz > 2.0:
-        score += min(fz - 2.0, 8.0)
+        score += min(fz - 2.0, 2.5)  # cap at +2.5, 低于默认阈值 3.0
         flags.append(f'F{fz:.1f}')
 
     hp_delta = fstats['pct_highF'] - baselines['highF_mean']
     if hp_delta > max(baselines['highF_std'], 0.5) * 2:
-        score += min(hp_delta / 5, 6.0)
+        score += min(hp_delta / 8, 2.0)  # cap at +2.0
         flags.append(f'hF+{hp_delta:.0f}%')
 
-    # 键异常 — 断裂 + 塌缩/新键, 必须有力异常配合
+    # ── 键异常: 独立检测, 不受力门控 ──
+    # 只要力和位移中有一个有异常 (fz > 2 或 dz > 3), 就确认键异常
     bdelta = bstats[1] - baselines['broken_mean']
     cdelta = bstats[2] - baselines['collapsed_mean']
-    if fz > 2.0:
-        if bdelta >= 1.0:
-            score += bdelta * 1.5
-            flags.append(f'Br+{bdelta:.0f}')
-        if cdelta >= 1.0:
-            score += cdelta * 1.5
-            flags.append(f'Col+{cdelta:.0f}')
+
+    # 检查是否有连接键异常的"确认信号" (有力或位移异常)
+    has_confirm = fz > 2.0
+    if dstats is not None and baselines.get('max_disp_mean', 0) > 0:
+        dz = (dstats['max_disp'] - baselines['max_disp_mean']) / max(baselines['max_disp_std'], 1e-3)
+        if dz > 3.0:
+            has_confirm = True
+    if dstats is not None and baselines.get('rmsd_mean', 0) > 0:
+        rz = (dstats['rmsd'] - baselines['rmsd_mean']) / max(baselines['rmsd_std'], 1e-3)
+        if rz > 5.0:
+            has_confirm = True
+
+    if bdelta >= 1.0:
+        score += bdelta * 2.0  # 每多一个断键 +2 (权重高, 可独立触发)
+        flags.append(f'Br+{bdelta:.0f}')
+    if cdelta >= 1.0:
+        score += cdelta * 2.0
+        flags.append(f'Col+{cdelta:.0f}')
 
     if dstats is not None and baselines.get('max_disp_mean', 0) > 0:
         dz = (dstats['max_disp'] - baselines['max_disp_mean']) / max(baselines['max_disp_std'], 1e-3)
