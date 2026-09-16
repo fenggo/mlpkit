@@ -1458,13 +1458,13 @@ def _stability_score(fstats, bstats, dstats, baselines):
     """
     score, flags = 0.0, []
 
-    fz = (fstats['maxF'] - baselines['maxF_mean']) / max(baselines['maxF_std'], 1e-6)
+    fz = (fstats['maxF'] - baselines['maxF_mean']) / max(baselines['maxF_std'], 0.5)
     if fz > 2.0:
         score += min(fz - 2.0, 8.0)
         flags.append(f'F{fz:.1f}')
 
     hp_delta = fstats['pct_highF'] - baselines['highF_mean']
-    if hp_delta > baselines['highF_std'] * 2:
+    if hp_delta > max(baselines['highF_std'], 0.5) * 2:
         score += min(hp_delta / 5, 6.0)
         flags.append(f'hF+{hp_delta:.0f}%')
 
@@ -1480,13 +1480,13 @@ def _stability_score(fstats, bstats, dstats, baselines):
             flags.append(f'Col+{cdelta:.0f}')
 
     if dstats is not None and baselines.get('max_disp_mean', 0) > 0:
-        dz = (dstats['max_disp'] - baselines['max_disp_mean']) / max(baselines['max_disp_std'], 1e-8)
+        dz = (dstats['max_disp'] - baselines['max_disp_mean']) / max(baselines['max_disp_std'], 1e-3)
         if dz > 3.0:
             score += min(dz - 3.0, 5.0)
             flags.append(f'D{dz:.1f}')
 
     if dstats is not None and baselines.get('rmsd_mean', 0) > 0:
-        rz = (dstats['rmsd'] - baselines['rmsd_mean']) / max(baselines['rmsd_std'], 1e-8)
+        rz = (dstats['rmsd'] - baselines['rmsd_mean']) / max(baselines['rmsd_std'], 1e-3)
         if rz > 5.0:
             score += min(rz - 5.0, 3.0)
             flags.append(f'R{rz:.1f}')
@@ -1535,23 +1535,29 @@ def _parse_lammps_dump(path, max_frames=None):
         iy = cols.index('yu') if 'yu' in cols else cols.index('y')
         iz = cols.index('zu') if 'zu' in cols else cols.index('z')
         itype = cols.index('type') if 'type' in cols else None
+        iid = cols.index('id') if 'id' in cols else None
         has_f = 'fx' in cols
 
-        symbols, pos, forces = [], [], None
+        atoms_data = []  # (id, symbol, pos, fx, fy, fz)
         for _ in range(natoms):
             p = lines[i].split(); i += 1
-            symbols.append(elem_map.get(int(p[itype]), 'X') if itype else 'X')
-            pos.append([float(p[ix]), float(p[iy]), float(p[iz])])
-            if has_f:
-                if forces is None:
-                    forces = []
-                forces.append([float(p[cols.index('fx')]),
-                               float(p[cols.index('fy')]),
-                               float(p[cols.index('fz')])])
+            aid  = int(p[iid]) if iid is not None else len(atoms_data) + 1
+            sym  = elem_map.get(int(p[itype]), 'X') if itype else 'X'
+            xyz  = [float(p[ix]), float(p[iy]), float(p[iz])]
+            fxyz = ([float(p[cols.index('fx')]),
+                     float(p[cols.index('fy')]),
+                     float(p[cols.index('fz')])] if has_f else [0,0,0])
+            atoms_data.append((aid, sym, xyz, fxyz))
 
-        atoms = AseAtoms(symbols=symbols, positions=np.array(pos), cell=cell, pbc=[True]*3)
-        if forces is not None:
-            atoms.set_array('forces', np.array(forces) * _REAL_FORCE_TO_ASE)
+        # sort by atom id for canonical order (matches data.lammps)
+        atoms_data.sort(key=lambda x: x[0])
+
+        symbols = [d[1] for d in atoms_data]
+        pos     = np.array([d[2] for d in atoms_data])
+        atoms   = AseAtoms(symbols=symbols, positions=pos, cell=cell, pbc=[True]*3)
+        if has_f:
+            forces = np.array([d[3] for d in atoms_data]) * _REAL_FORCE_TO_ASE
+            atoms.set_array('forces', forces)
         atoms.info['timestep'] = step
         yield atoms
         n += 1
