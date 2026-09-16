@@ -111,9 +111,9 @@ def run_msst(T=350, timestep=0.1, step=100, gen='poscar.gen', i=-1, model='w',
             x=x, y=y, z=z, n=n, lib=lib, thermo_fix=thermo_fix, r=r)
 
 
-def run_traj(inp='in.lammps', s=0, e=0, c=0,trj='lammps.trj'):
+def run_traj(inp='in.lammps', s=0, e=0, c=0,trj='lammps.trj',log='lmp.log'):
     atomid = None if e == 0 else (s, e)
-    lammpstraj_to_ase(trj, inp=inp, atomid=atomid, recover=c)
+    lammpstraj_to_ase(trj, inp=inp, atomid=atomid, recover=c,log=log)
 
 
 def run_plot(out='out'):
@@ -172,7 +172,7 @@ def lmd_dispatch(args):
                  dump_interval=args.dump_interval, free=args.free,
                  lib=args.lib, r=args.r)
     elif args.lmd_traj:
-        run_traj(inp=args.inp, s=args.s, e=args.e, c=args.c,trj=args.trj)
+        run_traj(inp=args.inp, s=args.s, e=args.e, c=args.c,trj=args.trj,log=args.log)
     elif args.lmd_plot:
         run_plot(out=args.out)
     elif args.w:

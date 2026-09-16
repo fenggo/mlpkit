@@ -292,6 +292,7 @@ def main():
     p_lmd.add_argument("--s", type=int, default=0, help="Traj start atom")
     p_lmd.add_argument("--e", type=int, default=0, help="Traj end atom")
     p_lmd.add_argument("--inp", default="in.lammps", help="Input file (traj mode)")
+    p_lmd.add_argument("--log", default="lmp.log", help="log file (traj mode)")
     p_lmd.add_argument("--trj", default="lammps.trj", help="trj file (traj mode)")
     p_lmd.add_argument("--out", default="out", help="Output prefix (plot mode)")
 
