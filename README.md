@@ -40,6 +40,8 @@ pip install .
 | `dbo` | 绘制轨迹中两原子间键级变化 |
 | `gmd` | GULP 分子动力学：NVT、优化、轨迹转换、绘图 |
 | `lmd` | LAMMPS 分子动力学：NVT、NPT、优化、MSST、轨迹转换、绘图 |
+| `mtp` | 将 ASE 轨迹转换为 MTP .cfg 训练格式 |
+| `gap` | 将 ASE 轨迹转换为 GAP extended XYZ 训练格式 |
 
 ---
 
@@ -663,6 +665,89 @@ mlpkit lmd --plot
 | `--w` | `data.lammps` + `in.lammps` |
 | `--traj` | `md.traj`（从 lammps.trj 转换） |
 | `--plot` | 温度/能量/压力 PDF 图标 |
+
+---
+
+## 16. `mtp` — MTP 训练数据
+
+将 ASE 轨迹文件（`.traj`）转换为 MTP（Moment Tensor Potential）的 `.cfg` 训练格式。
+
+```bash
+mlpkit mtp [--t PREFIXES] [--o OUTPUT]
+```
+
+### 参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--t` | `md` | 轨迹名前缀（空格分隔），如 `"ct4 ct2"` |
+| `--o` | `train.cfg` | 输出 `.cfg` 文件路径 |
+
+### 工作原理
+
+1. 扫描当前目录下所有 `.traj` 文件
+2. 匹配以指定前缀开头的轨迹文件
+3. 逐帧读取 ASE 轨迹，提取：原子数、元素、晶格、笛卡尔坐标、力、能量
+4. 按 MTP `.cfg` 格式写入 `train.cfg`
+5. 元素映射：`C→0, O→1, N→2, H→3`
+
+### 使用示例
+
+```bash
+# 用 ct4 和 ct2 开头的轨迹生成训练数据
+mlpkit mtp --t="ct4 ct2"
+
+# 指定输出文件名
+mlpkit mtp --t="md" --o=my_train.cfg
+```
+
+### 输出
+
+- `train.cfg`（或通过 `--o` 指定）— MTP .cfg 格式，每帧包含 `BEGIN_CFG … END_CFG` + 能量
+---
+
+## 17. `gap` — GAP 训练数据
+
+将 ASE 轨迹文件（`.traj`）转换为 GAP（Gaussian Approximation Potential）的 extended XYZ 训练格式，供 `gap_fit` 使用。
+
+```bash
+mlpkit gap [--t PREFIXES] [--o OUTPUT] [--config-type TYPE] [--skip-no-force] [--no-force]
+```
+
+### 参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--t` | `""` | 轨迹名前缀（空格分隔）。空 = 当前目录所有 `.traj` |
+| `--o` | `train.xyz` | 输出 `.xyz` 文件路径 |
+| `--config-type` | `auto` | config_type 来源：`auto`（从文件名提取，去掉 .traj）、`traj`（用完整 traj 文件名）、或自定义字符串 |
+| `--skip-no-force` | `False` | 跳过没有力数据的帧 |
+| `--no-force` | `False` | 不写入力数据（生成纯能量训练集） |
+
+### 输出格式
+
+GAP extended XYZ：
+- 第 1 行：原子数 N
+- 第 2 行：`config_type=… energy=… Lattice="…" pbc="T T T" Properties=species:S:1:pos:R:3:force:R:3`
+- 后续 N 行：`element x y z fx fy fz`
+- 若轨迹含应力数据，comment line 自动包含 `virial="…"`（stress × volume，9 分量）
+
+### 使用示例
+
+```bash
+# 用 ct4 和 ct2 开头的轨迹生成训练数据
+mlpkit gap --t="ct4 ct2"
+
+# 指定输出文件名和 config_type
+mlpkit gap --t="md" --o=gap_data.xyz --config-type=md_run
+
+# 仅写入能量数据（不含力）
+mlpkit gap --t="md" --no-force
+```
+
+### 输出
+
+- `train.xyz`（或通过 `--o` 指定）— extended XYZ 格式，可直接用于 `gap_fit atoms_filename=train.xyz …`
 
 ---
 

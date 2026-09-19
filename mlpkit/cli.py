@@ -31,6 +31,8 @@ COMMANDS = {
     "dbo": (dbo, "Plot bond order between two atoms from trajectory"),
     "gmd": (None, "GULP Molecular Dynamics: NVT, optimization, trajectory, plotting"),
     "lmd": (None, "LAMMPS Molecular Dynamics: NVT, NPT, opt, MSST, trajectory, plotting"),
+    "mtp": (None, "Convert ASE trajectories to MTP .cfg training format"),
+    "gap": (None, "Convert ASE trajectories to GAP extended XYZ training format"),
 }
 
 
@@ -296,6 +298,20 @@ def main():
     p_lmd.add_argument("--trj", default="lammps.trj", help="trj file (traj mode)")
     p_lmd.add_argument("--out", default="out", help="Output prefix (plot mode)")
 
+    # -- mtp --
+    p_mtp = sub.add_parser("mtp", help=COMMANDS["mtp"][1])
+    p_mtp.add_argument("--t", default="md", help="Trajectory prefixes (space-separated, e.g. 'ct4 ct2')")
+    p_mtp.add_argument("--o", default="train.cfg", help="Output .cfg file (default: train.cfg)")
+
+    # -- gap --
+    p_gap = sub.add_parser("gap", help=COMMANDS["gap"][1])
+    p_gap.add_argument("--t", default="", help="Trajectory prefixes (space-separated). Empty = all .traj")
+    p_gap.add_argument("--o", default="train.xyz", help="Output .xyz file (default: train.xyz)")
+    p_gap.add_argument("--config-type", default="auto",
+                       help="config_type: auto, traj, or custom string (default: auto)")
+    p_gap.add_argument("--skip-no-force", action="store_true", help="Skip frames with no force data")
+    p_gap.add_argument("--no-force", action="store_true", help="Omit force data")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -374,3 +390,10 @@ def main():
     elif args.command == "lmd":
         from mlpkit.lmd import lmd_dispatch
         lmd_dispatch(args)
+    elif args.command == "mtp":
+        from mlpkit.mtp import mtp_convert
+        mtp_convert(ts=args.t, output=args.o)
+    elif args.command == "gap":
+        from mlpkit.gap import gap_convert
+        gap_convert(ts=args.t, output=args.o, config_type=args.config_type,
+                    skip_no_force=args.skip_no_force, no_force=args.no_force)
