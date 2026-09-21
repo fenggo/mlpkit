@@ -40,11 +40,14 @@ def _write_extxyz(f, atoms, frame_idx, config_type="unknown", write_force=True):
     except Exception:
         pass
 
-    # properties
+    # properties — use the field names that hybrid's on-the-fly refit expects
+    # (refit.py: energy_parameter_name=QM_energy, force_parameter_name=QM_forces,
+    #  virial_parameter_name=QM_virial), so this train.xyz can be dropped straight
+    #  into `refit.previous_data` with no renaming.
     prop_parts = ["species:S:1", "pos:R:3"]
     has_force = forces is not None and write_force
     if has_force:
-        prop_parts.append("force:R:3")
+        prop_parts.append("QM_forces:R:3")
     properties = "Properties=" + ":".join(prop_parts)
 
     # comment line
@@ -58,10 +61,10 @@ def _write_extxyz(f, atoms, frame_idx, config_type="unknown", write_force=True):
     comment_parts = [ct_kv, lattice_kv, pbc_kv, properties]
     if energy is not None:
         # CRITICAL: no width format for energy — QUIP parser requires no leading spaces
-        comment_parts.insert(1, f"energy={energy:.8f}")
+        comment_parts.insert(1, f"QM_energy={energy:.8f}")
     if has_virial and virial_flat is not None:
         virial_str = " ".join(f"{v:15.8f}" for v in virial_flat)
-        comment_parts.insert(1, f'virial="{virial_str}"')
+        comment_parts.insert(1, f'QM_virial="{virial_str}"')
 
     comment_line = " ".join(comment_parts)
 
