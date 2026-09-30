@@ -1404,32 +1404,37 @@ def _force_stats(atoms):
 def _bond_stats(atoms, stretch_factor=1.15):
     """键异常统计: (stretched, broken, collapsed, close_pairs).
 
-    截断用 ref*1.3 只检查真正的共价键候选, max_ok 判断裂, min_ok (=ref*0.65) 判塌缩/新键.
+    截断用 ref*1.3 只检查真正的共价键候选, max_ok 判断裂,
+    min_ok (=ref*0.65) 判塌缩/新键. 纯 numpy 距离矩阵 (忽略 pbc,
+    键长 <2Å 时分子内键两端几乎总在同一映象), 避免 get_distances 的高成本.
     """
-    from ase.geometry import get_distances
-    natoms = len(atoms)
-    D, D_len = get_distances(atoms.positions, cell=atoms.cell, pbc=atoms.pbc)
-    stretched, broken, collapsed, close = 0, 0, 0, 0
-    for i in range(natoms):
-        row = D_len[i]
-        si = atoms.symbols[i]
-        for j in range(i + 1, natoms):
-            sj = atoms.symbols[j]
-            key = (si, sj) if si <= sj else (sj, si)
-            if key not in _COVALENT_BONDS:
-                continue
-            ref, max_ok = _COVALENT_BONDS[key]
-            min_ok = ref * 0.65  # 范德华接触下限, 低于此为新键/碰撞
-            d = row[j]
-            if d > ref * 1.3:
-                continue
-            close += 1
-            if d > max_ok:
-                broken += 1
-            elif d < min_ok:
-                collapsed += 1
-            elif d > ref * stretch_factor:
-                stretched += 1
+    syms = np.array(atoms.get_chemical_symbols())
+    pos = atoms.positions
+    # 裸欧氏距离矩阵 (numpy 广播, 快于 ase get_distances 的 pbc 处理)
+    diff = pos[:, None, :] - pos[None, :, :]
+    D_len = np.sqrt(np.einsum('ijk,ijk->ij', diff, diff))
+    stretched = broken = collapsed = close = 0
+
+    for key, (ref, max_ok) in _COVALENT_BONDS.items():
+        si, sj = key
+        idx_i = np.where(syms == si)[0]
+        idx_j = np.where(syms == sj)[0]
+        if idx_i.size == 0 or idx_j.size == 0:
+            continue
+        sub = D_len[np.ix_(idx_i, idx_j)]
+        if si == sj:
+            iu = np.triu_indices_from(sub, k=1)
+            sub = sub[iu]
+        within = sub <= ref * 1.3
+        close += int(within.sum())
+        d = sub[within]
+        if d.size == 0:
+            continue
+        min_ok = ref * 0.65
+        broken    += int((d > max_ok).sum())
+        collapsed += int((d < min_ok).sum())
+        stretched += int(((d <= max_ok) & (d > ref * stretch_factor)).sum())
+
     return stretched, broken, collapsed, close
 
 
@@ -1445,61 +1450,80 @@ def _disp_stats(atoms, prev):
     }
 
 
-def _stability_score(fstats, bstats, dstats, baselines):
+def _dfdt_stats(atoms_prev, atoms_cur):
+    """逐原子力变化率 df/dt 统计 (dt=1 MD 步).
+
+    分子晶体失稳的本质是分子间作用力瞬间崩溃:
+    力在一步内对某些原子突然跳变, 而不是缓慢爬升.
+    返回每个原子的 |dF/dt| 统计量.
+    """
+    if atoms_prev is None or atoms_cur is None:
+        return None
+    if 'forces' not in atoms_cur.arrays or 'forces' not in atoms_prev.arrays:
+        return None
+    df = np.linalg.norm(atoms_cur.arrays['forces'] - atoms_prev.arrays['forces'], axis=1)
+    return {
+        'max_df': float(np.max(df)),               # 单原子最大力突跳
+        'p99_df': float(np.percentile(df, 99)),    # 99 分位
+        'mean_df': float(np.mean(df)),             # 均量
+    }
+
+
+def _stability_score(fstats, bstats, dstats, dfdt, baselines):
     """综合稳定性评分 (0=正常, 越高越不稳定).
 
-    信号与权重:
-      断键增量 (broken)  — 键断裂, 最可靠信号
-      塌缩增量 (collapsed) — 新键形成/原子碰撞
-      maxF Z-score — 力偏离基线 (辅助, 不能单独触发)
-      highF% 增量  — 力分布变宽 (辅助)
-      max_disp Z-score — 原子位移
-      RMSD Z-score — 全局漂移确认
+    分子晶体 (TNT·CL20 等) 失稳的本质是分子间作用力瞬间崩溃,
+    而非共价键断裂或力缓慢爬升. 因此核心信号是:
+
+      1. df/dt 力突跳   — 单原子一步内力跳变, 失稳的直接特征 (独立触发)
+      2. 键断裂/塌缩    — 对会断键的体系有效 (独立触发)
+      3. maxF 力偏移    — 仅作辅助, 门槛高 (防暖机段漂移误报)
+      4. 位移/RMSD      — 辅助确认
+
+    正常帧: df/dt ≤ 0.4 eV/Å/步 (P100), maxF 缓慢爬升不算失稳.
     """
     score, flags = 0.0, []
 
-    # ── 力信号: cap 在阈值以下, 纯力不能单独触发 (避免 ReaxFF 假阳性) ──
-    fz = (fstats['maxF'] - baselines['maxF_mean']) / max(baselines['maxF_std'], 0.5)
-    if fz > 2.0:
-        score += min(fz - 2.0, 2.5)  # cap at +2.5, 低于默认阈值 3.0
-        flags.append(f'F{fz:.1f}')
+    # ── 1. df/dt 力突跳 (核心, 绝对阈值不依赖基线) ──
+    # 正常态单原子 max_df 全程 ≤0.4, 分子间力崩溃时一步可跳 >1.0
+    if dfdt is not None:
+        max_df = dfdt['max_df']
+        if max_df > 1.0:
+            score += min(5.0 + (max_df - 1.0) * 5.0, 15.0)
+            flags.append(f'dF{max_df:.1f}')
 
-    hp_delta = fstats['pct_highF'] - baselines['highF_mean']
-    if hp_delta > max(baselines['highF_std'], 0.5) * 2:
-        score += min(hp_delta / 8, 2.0)  # cap at +2.0
-        flags.append(f'hF+{hp_delta:.0f}%')
-
-    # ── 键异常: 独立检测, 不受力门控 ──
-    # 只要力和位移中有一个有异常 (fz > 2 或 dz > 3), 就确认键异常
+    # ── 2. 键异常: 断裂 + 塌缩/新键 (独立触发) ──
     bdelta = bstats[1] - baselines['broken_mean']
     cdelta = bstats[2] - baselines['collapsed_mean']
-
-    # 检查是否有连接键异常的"确认信号" (有力或位移异常)
-    has_confirm = fz > 2.0
-    if dstats is not None and baselines.get('max_disp_mean', 0) > 0:
-        dz = (dstats['max_disp'] - baselines['max_disp_mean']) / max(baselines['max_disp_std'], 1e-3)
-        if dz > 3.0:
-            has_confirm = True
-    if dstats is not None and baselines.get('rmsd_mean', 0) > 0:
-        rz = (dstats['rmsd'] - baselines['rmsd_mean']) / max(baselines['rmsd_std'], 1e-3)
-        if rz > 5.0:
-            has_confirm = True
-
     if bdelta >= 1.0:
-        score += bdelta * 2.0  # 每多一个断键 +2 (权重高, 可独立触发)
+        score += bdelta * 2.0
         flags.append(f'Br+{bdelta:.0f}')
     if cdelta >= 1.0:
         score += cdelta * 2.0
         flags.append(f'Col+{cdelta:.0f}')
 
-    if dstats is not None and baselines.get('max_disp_mean', 0) > 0:
-        dz = (dstats['max_disp'] - baselines['max_disp_mean']) / max(baselines['max_disp_std'], 1e-3)
+    # ── 3. maxF 力偏移 (辅助, 门槛抬高避免暖机漂移) ──
+    # 用 median/MAD 稳健基线, 且需极强偏移才触发 (真失稳时 maxF 会暴涨)
+    if 'maxF_median' in baselines:
+        fmed = baselines['maxF_median']
+        fmad = baselines.get('maxF_mad', 0.5)
+    else:
+        fmed = baselines['maxF_mean']
+        fmad = baselines.get('maxF_std', 0.5)
+    fz = (fstats['maxF'] - fmed) / max(fmad, 0.5)
+    if fz > 6.0:
+        score += min(fz - 6.0, 4.0)
+        flags.append(f'F{fz:.1f}')
+
+    # ── 4. 位移/RMSD (辅助确认) ──
+    if dstats is not None and baselines.get('max_disp_median', 0) > 0:
+        dz = (dstats['max_disp'] - baselines['max_disp_median']) / max(baselines['max_disp_mad'], 1e-3)
         if dz > 3.0:
             score += min(dz - 3.0, 5.0)
             flags.append(f'D{dz:.1f}')
 
-    if dstats is not None and baselines.get('rmsd_mean', 0) > 0:
-        rz = (dstats['rmsd'] - baselines['rmsd_mean']) / max(baselines['rmsd_std'], 1e-3)
+    if dstats is not None and baselines.get('rmsd_median', 0) > 0:
+        rz = (dstats['rmsd'] - baselines['rmsd_median']) / max(baselines['rmsd_mad'], 1e-3)
         if rz > 5.0:
             score += min(rz - 5.0, 3.0)
             flags.append(f'R{rz:.1f}')
@@ -1621,24 +1645,33 @@ def critical(dump='meta_nvt.lammpstrj', log=None, output='critical.traj',
         print('❌ 无法读取帧 (无 force 信息)')
         return
 
+    def _median_mad(xs):
+        m = float(np.median(xs))
+        mad = float(np.median(np.abs(np.asarray(xs) - m)))
+        return m, mad
+
+    maxF_med, maxF_mad = _median_mad([f['maxF'] for f in base_fstats])
     baselines = {
         'maxF_mean': float(np.mean([f['maxF'] for f in base_fstats])),
         'maxF_std':  float(np.std([f['maxF'] for f in base_fstats])),
-        'highF_mean': float(np.mean([f['pct_highF'] for f in base_fstats])),
-        'highF_std':  float(np.std([f['pct_highF'] for f in base_fstats])),
+        'maxF_median': maxF_med,
+        'maxF_mad':    maxF_mad,
         'broken_mean': float(np.mean([b[1] for b in base_bstats])),
         'collapsed_mean': float(np.mean([b[2] for b in base_bstats])),
     }
     if base_dstats:
-        baselines['max_disp_mean'] = float(np.mean([d['max_disp'] for d in base_dstats]))
-        baselines['max_disp_std']  = float(np.std([d['max_disp'] for d in base_dstats]))
-        baselines['rmsd_mean'] = float(np.mean([d['rmsd'] for d in base_dstats]))
-        baselines['rmsd_std']  = float(np.std([d['rmsd'] for d in base_dstats]))
+        d_med, d_mad = _median_mad([d['max_disp'] for d in base_dstats])
+        baselines['max_disp_median'] = d_med
+        baselines['max_disp_mad'] = d_mad
+        r_med, r_mad = _median_mad([d['rmsd'] for d in base_dstats])
+        baselines['rmsd_median'] = r_med
+        baselines['rmsd_mad'] = r_mad
 
     print(f'📊 基线 ({len(base_fstats)} 帧): '
-          f'maxF={baselines["maxF_mean"]:.1f}±{baselines["maxF_std"]:.1f}, '
+          f'maxF={baselines["maxF_median"]:.2f}±{baselines["maxF_mad"]:.3f}, '
           f'断键均={baselines["broken_mean"]:.0f}')
-    print(f'   异常阈值={score_threshold}, 崩溃阈值={crash_score}')
+    print(f'   异常阈值={score_threshold}, 崩溃阈值={crash_score}, '
+          f'df/dt 阈值=1.0 eV/Å/步')
 
     # ── 扫描 ──
     frames, crashed, taken = [], False, False
@@ -1654,7 +1687,8 @@ def critical(dump='meta_nvt.lammpstrj', log=None, output='critical.traj',
                 prev = atoms; continue
             bs = _bond_stats(atoms)
             ds = _disp_stats(atoms, prev)
-            score, flags = _stability_score(fs, bs, ds, baselines)
+            dfdt = _dfdt_stats(prev, atoms)
+            score, flags = _stability_score(fs, bs, ds, dfdt, baselines)
             step = atoms.info.get('timestep', total)
 
             if not crashed and score > crash_score:
