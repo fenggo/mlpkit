@@ -478,7 +478,7 @@ def active(label='ct4', ncpu=12, iters=1, epochs=300, chunk_size=1000,
     DUMP_DIR       = os.path.join(META_DIR, 'chunks')
 
     print(f"\n{'='*70}")
-    print(f"  分块式主动学习")
+    print(f"    主动学习")
     print(f"    工作目录 (META):  {META_DIR}")
     print(f"    训练目录 (TRAIN): {TRAIN_DIR}")
     print(f"    LABEL:    {LABEL}")
