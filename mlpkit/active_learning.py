@@ -41,7 +41,7 @@ LABEL       = 'ct4'
 NPROCS      = 12
 
 # Python 环境
-ANACONDA_PY = '/home/feng/.local/anaconda/bin/python3'  # mlpkit 所在 Python
+ANACONDA_PY = 'python'  # mlpkit 所在 Python
 
 # LAMMPS
 LMP         = 'lammps'
@@ -572,7 +572,7 @@ write_restart   restart.init
     total_chunks = 0
 
     print(f"\n{'='*70}")
-    print("  分块式主动学习")
+    print("  主动学习")
     print(f"  每 chunk: {chunk_size} 步")
     print(f"  失稳阈值: score > {critical_threshold}")
     print(f"{'='*70}")
