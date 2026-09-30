@@ -33,6 +33,7 @@ COMMANDS = {
     "lmd": (None, "LAMMPS Molecular Dynamics: NVT, NPT, opt, MSST, trajectory, plotting"),
     "mtp": (None, "Convert ASE trajectories to MTP .cfg training format"),
     "gap": (None, "Convert ASE trajectories to GAP extended XYZ training format"),
+    "active": (None, "Chunked active learning loop: chunked MD → critical → DFT → training"),
 }
 
 
@@ -312,6 +313,28 @@ def main():
     p_gap.add_argument("--skip-no-force", action="store_true", help="Skip frames with no force data")
     p_gap.add_argument("--no-force", action="store_true", help="Omit force data")
 
+    # -- active --
+    p_active = sub.add_parser("active", help=COMMANDS["active"][1])
+    p_active.add_argument("--label", default="ct4", help="Training label (default: ct4)")
+    p_active.add_argument("--ncpu", type=int, default=12, help="MPI processes (default: 12)")
+    p_active.add_argument("--iters", type=int, default=1, help="Active learning iterations (default: 1)")
+    p_active.add_argument("--epochs", type=int, default=300, help="Training epochs per iteration (default: 300)")
+    p_active.add_argument("--chunk-size", type=int, default=1000, help="MD steps per chunk (default: 1000)")
+    p_active.add_argument("--max-chunks", type=int, default=None, help="Max chunks (default: unlimited)")
+    p_active.add_argument("--max-md-steps", type=int, default=None, help="Max total MD steps (default: unlimited)")
+    p_active.add_argument("--md-timeout", type=int, default=2*3600, help="MD timeout per chunk (s, default: 2h)")
+    p_active.add_argument("--critical-threshold", type=float, default=3.0,
+                          help="mlpkit.critical score_threshold (default: 3.0)")
+    p_active.add_argument("--critical-crash", type=float, default=50.0,
+                          help="mlpkit.critical crash_score (default: 50.0)")
+    p_active.add_argument("--min-persist", type=int, default=3,
+                          help="mlpkit.critical consecutive abnormal frames (default: 3)")
+    p_active.add_argument("--elements", type=str, default=None,
+                          help="Element list (space-separated, e.g. 'C H N O'). Auto-detect by default")
+    p_active.add_argument("--temp", type=float, default=350.0, help="MD temperature (K, default: 350)")
+    p_active.add_argument("--data-file", type=str, default=None,
+                          help="data.lammps path (default: <cwd>/data.lammps)")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -397,3 +420,14 @@ def main():
         from mlpkit.gap import gap_convert
         gap_convert(ts=args.t, output=args.o, config_type=args.config_type,
                     skip_no_force=args.skip_no_force, no_force=args.no_force)
+    elif args.command == "active":
+        from mlpkit.active_learning import active
+        active(label=args.label, ncpu=args.ncpu, iters=args.iters,
+               epochs=args.epochs, chunk_size=args.chunk_size,
+               max_chunks=args.max_chunks, max_md_steps=args.max_md_steps,
+               md_timeout=args.md_timeout,
+               critical_threshold=args.critical_threshold,
+               critical_crash=args.critical_crash,
+               min_persist=args.min_persist,
+               elements=args.elements, temp=args.temp,
+               data_file=args.data_file)

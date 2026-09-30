@@ -42,6 +42,7 @@ pip install .
 | `lmd` | LAMMPS 分子动力学：NVT、NPT、优化、MSST、轨迹转换、绘图 |
 | `mtp` | 将 ASE 轨迹转换为 MTP .cfg 训练格式 |
 | `gap` | 将 ASE 轨迹转换为 GAP extended XYZ 训练格式 |
+| `active` | 分块式主动学习循环：chunked MD → critical → DFT → 训练 |
 
 ---
 
@@ -748,6 +749,61 @@ mlpkit gap --t="md" --no-force
 ### 输出
 
 - `train.xyz`（或通过 `--o` 指定）— extended XYZ 格式，可直接用于 `gap_fit atoms_filename=train.xyz …`
+
+---
+
+## 18. `active` — 分块式主动学习
+
+针对分子晶体体系的 ReaxFF-nn 力场主动学习循环。每一轮：分块 MD → `mlpkit.critical()` 判断失稳 → siesta DFT 打标签 → 训练 → 力场同步 → 回滚重启。
+
+```bash
+mlpkit active [--label L] [--ncpu N] [--iters N] [--epochs N] [--chunk-size N] ...
+```
+
+### 参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--label` | `ct4` | 训练标签（`{label}.traj` 命名） |
+| `--ncpu` | `12` | MPI 进程数（NPROCS） |
+| `--iters` | `1` | 主动学习轮数（DFT+训练次数） |
+| `--epochs` | `300` | 每轮训练 epoch |
+| `--chunk-size` | `1000` | 每 chunk 的 MD 步数 |
+| `--max-chunks` | `None` | 最大 chunk 数 |
+| `--max-md-steps` | `None` | MD 总步数上限 |
+| `--md-timeout` | `7200` | 每 chunk MD 超时（秒） |
+| `--critical-threshold` | `3.0` | mlpkit.critical score_threshold |
+| `--critical-crash` | `50.0` | mlpkit.critical crash_score |
+| `--min-persist` | `3` | 连续异常帧数 |
+| `--elements` | `None` | 元素列表（空格分隔，默认自动检测） |
+| `--temp` | `350.0` | MD 温度 (K) |
+| `--data-file` | `None` | data.lammps 路径 |
+
+### 目录约定
+
+- **工作目录（META_DIR）** = 当前目录，存放 `data.lammps`、`ffield`、restart、dump
+- **训练目录（TRAIN_DIR）** = 当前目录的上一级，存放 `ffield.json`、`train.py`、`lm.py`
+
+### 使用示例
+
+```bash
+# 在 meta 目录下运行 1 轮（label=ct4, 12 核）
+cd /path/to/meta
+mlpkit active --label=ct4 --ncpu=12
+
+# 运行 5 轮，每轮训练 500 epoch
+mlpkit active --label=cb22 --ncpu=24 --iters=5 --epochs=500
+
+# 指定 chunk 大小和温度
+mlpkit active --chunk-size=2000 --temp=300
+```
+
+### 流程
+
+1. 分块 MD（NPT + restart 续跑），每 chunk 写 restart + dump
+2. `mlpkit.critical()` 检测失稳帧
+3. 若失稳：siesta DFT 单点（lm.py）→ 训练（train.py）→ ffield.json→ffield 同步
+4. 回滚到失稳前的安全 restart，用新力场继续
 
 ---
 
